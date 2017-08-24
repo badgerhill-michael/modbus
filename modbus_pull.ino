@@ -1,32 +1,37 @@
 // This #include statement was automatically added by the Particle IDE.
 #include "ModbusMaster.h"
 
-int             slave_id = 2;
+//int             slave_id = 2;   /* Emerson Smart Gateway */
+int             slave_id = 255; /* Gas flow meter */
+
 ModbusMaster    node( slave_id );
-char            msg[512];
-int             delay_time = 5000;
+char            msg[1024];
+int             delay_time = 4000;
 int             err_count=0;
+
+LEDStatus normal( RGB_COLOR_GREEN,  LED_PATTERN_FADE,  LED_SPEED_NORMAL );
+LEDStatus error(  RGB_COLOR_YELLOW, LED_PATTERN_BLINK, LED_SPEED_SLOW   );
+LEDStatus fail(   RGB_COLOR_RED,    LED_PATTERN_BLINK, LED_SPEED_FAST   );
 
 void setup() {
 //  Particle.variable("msg", msg );
 // initialize Modbus communication baud rate
     node.begin(9600);
     node.enableTXpin(D7);
-//  node.enableDebug();  //Print TX and RX frames out on Serial. Beware, enabling this messes up the timings for RS485 Transactions, causing them to fail.
+//    node.enableDebug();  //Print TX and RX frames out on Serial. Beware, enabling this messes up the timings for RS485 Transactions, causing them to fail.
 	sprintf( msg, "%s", "Starting Modbus Interface" );
 	log_msg( msg );
+//  Subscribe to the integration response event
+//    Particle.subscribe("hook-response/modbus", googleCloudHandler, MY_DEVICES);
 }
 
-/* not tested yet */
-void init_modbus() {
-    digitalWrite( D7, LOW );
-    delay( delay_time );
+//void googleCloudHandler( const char *event, const char *data ) {
+//    normal.setActive(true);
+//    Particle.publish( "modbus-log", "Google said OK" );
+//}
 
-    digitalWrite( D7, HIGH );
-    delay( delay_time );
-    
-    digitalWrite( D7, LOW );
-    delay( delay_time );
+void init_modbus() {
+    System.reset();
 }
 
 void loop() {
@@ -35,27 +40,25 @@ void loop() {
 	char            datestring[256];
     char            err[256];
 
-
-    if( err_count > 2 ) {
-        sprintf( msg, "Too many errs (%i), rebooting modbus", err_count );
-	    log_msg( msg );
-        delay( delay_time );
-        init_modbus();
-        delay( delay_time );
-        err_count = 0;
-    }
-    get_gateway_time( datestring );
+    check_error_state( err_count );
+    get_gas_flow();
     delay( delay_time );
+
+/* The below is for the Emerson Smart Gateway */
+/*
+    get_gateway_time( datestring );
+    delay( 4096 );
 
     int qty = 8;
     result = get_modbus_data3( data, 0, qty );
     if ( result == node.ku8MBSuccess ) {
-        sprintf( msg, "%s, %0.0f, %0.2f, %0.2f, %0.2f",
+        sprintf( msg, "%s, %0.0f, %0.2f, %0.2f, %0.2f, %i",
             datestring,
             convert_ints_to_float(&data[0]),
             convert_ints_to_float(&data[2]),
             convert_ints_to_float(&data[4]),
-            convert_ints_to_float(&data[6])
+            convert_ints_to_float(&data[6]),
+            Time.now()
         );
 		log_msg( msg );
     }
@@ -66,9 +69,34 @@ void loop() {
         log_msg( msg );
     }
      delay( delay_time );
+ */
+}
+
+void check_error_state( int err_count ) {
+    if( err_count > 5 ) {
+        normal.setActive(false);
+        error.setActive(false);
+        fail.setActive(true);
+        sprintf( msg, "Too many errs (%i), rebooting.", err_count );
+	    log_msg( msg );
+        delay( delay_time );
+        init_modbus();
+        // The below will never execute...
+        delay( delay_time );
+        err_count = 0;
+    }
+    else {
+        normal.setActive(true);
+        error.setActive(false);
+        fail.setActive(false);
+    }
 }
 
 void get_modbus_error( uint8_t result, char* err ) {
+    normal.setActive(false);
+    error.setActive(true);
+    fail.setActive(false);
+
     if( result == node.ku8MBInvalidSlaveID )
         sprintf( err, "Invalid slave id: %i", slave_id );
     else if( result == node.ku8MBInvalidFunction )
@@ -105,6 +133,31 @@ uint8_t get_modbus_data4( uint16_t data_buffer[], uint16_t maddress, uint16_t mq
 	node.clearResponseBuffer();
     node.clearTransmitBuffer();
 	return( result );
+}
+
+void get_gas_flow() {
+    uint8_t         result;
+    uint16_t        addr, qty, data[2];
+    char            err[256];
+
+    addr = 2;
+    qty = 5;
+
+    result = get_modbus_data4( data, addr, qty );
+    if ( result == node.ku8MBSuccess ) {
+        float dv = ( data[0] * 65536 + data[1] ) /1000.0;
+        float v1 = data[2] * 65536 + data[3];
+        float v = (v1 *1000 + data[4])/1000.0;
+
+        sprintf( msg, "%i, %7.3f, %8.3f", Time.now(), dv, v );
+        log_msg( msg );
+    }
+    else {
+        err_count++;
+        get_modbus_error( result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+        log_msg( msg );
+    }
 }
 
 void get_constant_float() {
@@ -188,5 +241,5 @@ void get_gateway_time( char* date_string ) {
 void log_msg( char* msg ) {
 //    Serial.println( msg );
     Particle.publish( "modbus", msg );
-    delay( 250 );
+//    delay( 1000 );
 }
