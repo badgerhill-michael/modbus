@@ -3,14 +3,15 @@
 
 /////////////////////////////////////////////////////////////////////////////////////
 // Slave ID = 2 refers to the Emerson Smart Gateway in our particular configuration
-ModbusMaster    nodeSG( 2 );  
-//
+ModbusMaster    nodeSG( 2 ); 
 // Slave ID = 255 refers to the gas mass flow meter
 ModbusMaster    nodeGF( 255 );  
+// Slave ID = 10 refers to a SOLO temp controller
+ModbusMaster    nodeSO( 10 );  
 //
 // Delay between data requests. Sort of.
 // The numberator, in milliseconds, is roughly the total time between reports.
-int             delay_time = 30000/3; 
+int             delay_time = 1000; 
 /////////////////////////////////////////////////////////////////////////////////////
 
 char            msg[1024];
@@ -27,32 +28,34 @@ typedef struct fork_info {
   float T;
 } fork_info;
 
+typedef struct temp_info {
+  float T;
+  float SP;
+  float OUT1;
+} temp_info;
+
 gas_flow get_gas_flow();
 fork_info get_fork_info();
+temp_info get_temp_info();
+
 
 LEDStatus normal( RGB_COLOR_GREEN,  LED_PATTERN_FADE,  LED_SPEED_NORMAL );
 LEDStatus error(  RGB_COLOR_YELLOW, LED_PATTERN_BLINK, LED_SPEED_SLOW   );
 LEDStatus fail(   RGB_COLOR_RED,    LED_PATTERN_BLINK, LED_SPEED_FAST   );
 
 void setup() {
-//  Particle.variable("msg", msg );
-// initialize Modbus communication baud rate
     nodeSG.begin(9600);
     nodeSG.enableTXpin(D7);
+
     nodeGF.begin(9600);
     nodeGF.enableTXpin(D7);
 
-//  node.enableDebug();  //Print TX and RX frames out on Serial. Beware, enabling this messes up the timings for RS485 Transactions, causing them to fail.
+    nodeSO.begin(9600);
+    nodeSO.enableTXpin(D7);
+
 	sprintf( msg, "%s", "Starting Modbus Interface" );
 	log_msg( msg );
-//  Subscribe to the integration response event
-//    Particle.subscribe("hook-response/modbus", googleCloudHandler, MY_DEVICES);
 }
-
-//void googleCloudHandler( const char *event, const char *data ) {
-//    normal.setActive(true);
-//    Particle.publish( "modbus-log", "Google said OK" );
-//}
 
 void init_modbus() {
     System.reset();
@@ -62,50 +65,44 @@ void loop() {
 	char            datestring[256];
     gas_flow        co2_meter;
     fork_info       density_fork;
+    temp_info       temp_ctl1;
 
     check_error_state( err_count );
- 
-    get_gateway_time( datestring );
+
+    temp_ctl1 = get_temp_info();
+    sprintf( msg, "TEMP CONTROLLER, t, %li, T, %0.1f, SP, %0.1f, OUT1, %0.1f", Time.now(), temp_ctl1.T, temp_ctl1.SP, temp_ctl1.OUT1 );
+    log_msg( msg );
     delay( delay_time );
+
+/*    get_gateway_time( datestring );
+    sprintf( msg, "GATEWAY, t, %i, Date, %s", Time.now(), datestring );
+    log_msg( msg );    delay( delay_time );
+ */
     
     co2_meter = get_gas_flow();
+    sprintf( msg, "GAS FLOW, t, %li, v, %0.1f, dv, %0.1f", Time.now(), co2_meter.v, co2_meter.dv );
+    log_msg( msg );
     delay( delay_time );
     
     density_fork = get_fork_info();
-    
-    sprintf( msg, "%li, %s, %0.0f, %0.2f, %0.2f, %8.3f, %7.2f",
+    sprintf( msg, "DENSITY FORK, t, %li, wet, %0.0f, f, %0.1f, T, %0.1f", Time.now(), density_fork.wet, density_fork.f, density_fork.T );
+    log_msg( msg );
+    delay( delay_time );
+ 
+/*    sprintf( msg, "%li, %s, %0.0f, %0.2f, %0.2f, %0.2f, %0.2f, %0.1f, %0.1f, %0.1f",
         Time.now(),
         datestring,
         density_fork.wet,
         density_fork.f,
         density_fork.T,
         co2_meter.v,
-        co2_meter.dv
+        co2_meter.dv,
+        temp_ctl1.T,
+        temp_ctl1.SP,
+        temp_ctl1.OUT1
     );
 	log_msg( msg );
-    delay( delay_time );
-}
-
-fork_info get_fork_info() {
-	uint8_t         result;
-	uint16_t        data[16];
-    char            err[256];
-    fork_info       new_reading;
-
-    int qty = 6;
-    result = get_modbus_data3( nodeSG, data, 0, qty );
-    if ( result == nodeSG.ku8MBSuccess ) {
-        new_reading.wet = convert_ints_to_float(&data[0]);
-        new_reading.f   = convert_ints_to_float(&data[2]);
-        new_reading.T   = convert_ints_to_float(&data[4]);
-    }
-    else {
-        err_count++;
-        get_modbus_error( nodeSG, result, err );
-        sprintf( msg, "Error: %i (%X): %s", result, result, err );
-        log_msg( msg );
-    }
-    return( new_reading );
+ */
 }
 
 void check_error_state( int err_count ) {
@@ -134,7 +131,7 @@ void get_modbus_error( ModbusMaster node, uint8_t result, char* err ) {
     fail.setActive(false);
 
     if( result == node.ku8MBInvalidSlaveID )
-        sprintf( err, "Invalid slave id" );
+        sprintf( err, "Invalid slave id or comm error" );
     else if( result == node.ku8MBInvalidFunction )
         sprintf( err, "Invalid function" );
     else if( result == node.ku8MBResponseTimedOut )
@@ -148,6 +145,9 @@ void get_modbus_error( ModbusMaster node, uint8_t result, char* err ) {
 uint8_t get_modbus_data3( ModbusMaster node, uint16_t data_buffer[], uint16_t maddress, uint16_t mqty ) {
     uint8_t     result;
 
+//  sprintf( msg, "node.readInputRegisters( %i, %i );", maddress, mqty );
+//  log_msg( msg );
+    
     result = node.readInputRegisters( maddress, mqty );
     if ( result == node.ku8MBSuccess ) {
 		for ( int j = 0; j < mqty; j++ )
@@ -161,6 +161,9 @@ uint8_t get_modbus_data3( ModbusMaster node, uint16_t data_buffer[], uint16_t ma
 uint8_t get_modbus_data4( ModbusMaster node, uint16_t data_buffer[], uint16_t maddress, uint16_t mqty ) {
     uint8_t     result;
 
+//  sprintf( msg, "node.readHoldingRegisters( %i, %i );", maddress, mqty );
+//  log_msg( msg );
+
     result = node.readHoldingRegisters( maddress, mqty );
     if ( result == node.ku8MBSuccess ) {
 		for ( int j = 0; j < mqty; j++ )
@@ -169,6 +172,46 @@ uint8_t get_modbus_data4( ModbusMaster node, uint16_t data_buffer[], uint16_t ma
 	node.clearResponseBuffer();
     node.clearTransmitBuffer();
 	return( result );
+}
+
+temp_info get_temp_info() {
+    uint8_t         result;
+    uint16_t        addr, qty, data[2];
+    char            err[256];
+    float           t  = 0.0,
+                    sp = 0.0;
+    temp_info       new_reading;
+
+    addr = 4097;// Current temp
+    qty = 2;
+
+    result = get_modbus_data4( nodeSO, data, addr-1, qty );
+    if ( result == nodeSO.ku8MBSuccess ) {
+        new_reading.T  = data[0]/10.0;
+        new_reading.SP = data[1]/10.0;
+    }
+    else {
+        err_count++;
+        get_modbus_error( nodeGF, result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+        log_msg( msg );
+    }
+    delay(delay_time);
+    
+    addr = 4115; // Output 1 %
+    qty = 1;
+
+    result = get_modbus_data4( nodeSO, data, addr-1, qty );
+    if ( result == nodeSO.ku8MBSuccess ) {
+        new_reading.OUT1  = data[0]/10.0;
+    }
+    else {
+        err_count++;
+        get_modbus_error( nodeGF, result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+        log_msg( msg );
+    }
+    return( new_reading );
 }
 
 gas_flow get_gas_flow() {
@@ -185,8 +228,6 @@ gas_flow get_gas_flow() {
         new_reading.dv = ( data[0] * 65536 + data[1] ) /1000.0;
         float v1 = data[2] * 65536 + data[3];
         new_reading.v = (v1 *1000 + data[4])/1000.0;
-//        sprintf( msg, "%li, %7.3f, %8.3f", Time.now(), dv, v );
-//        log_msg( msg );
     }
     else {
         err_count++;
@@ -195,26 +236,6 @@ gas_flow get_gas_flow() {
         log_msg( msg );
     }
     return( new_reading );
-}
-
-void get_constant_float() {
-    uint8_t         result;
-    uint16_t        addr, qty, data[2];
-    char            err[256];
-
-    addr = 9012;
-    qty = 2;
-    result = get_modbus_data4( nodeSG, data, addr-1, qty );
-    if ( result == nodeSG.ku8MBSuccess ) {
-        sprintf( msg, "%x %x %f", data[0], data[1], convert_ints_to_float(&data[0]) );
-        log_msg( msg );
-    }
-    else {
-        err_count++;
-        get_modbus_error( nodeSG, result, err );
-        sprintf( msg, "Error: %i (%X): %s", result, result, err );
-        log_msg( msg );
-    }
 }
 
 void get_msg_stats() {
@@ -275,8 +296,30 @@ void get_gateway_time( char* date_string ) {
     }
 }
 
+fork_info get_fork_info() {
+	uint8_t         result;
+	uint16_t        data[16];
+    char            err[256];
+    fork_info       new_reading;
+
+    int qty = 6;
+    result = get_modbus_data4( nodeSG, data, 0, qty );
+    if ( result == nodeSG.ku8MBSuccess ) {
+        new_reading.wet = convert_ints_to_float(&data[0]);
+        new_reading.f   = convert_ints_to_float(&data[2]);
+        new_reading.T   = convert_ints_to_float(&data[4]);
+    }
+    else {
+        err_count++;
+        get_modbus_error( nodeSG, result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+        log_msg( msg );
+    }
+    return( new_reading );
+}
+
 void log_msg( char* msg ) {
 //    Serial.println( msg );
     Particle.publish( "modbus", msg );
-//   delay( delay_time );
+//    delay( delay_time );
 }
