@@ -11,7 +11,7 @@ ModbusMaster    nodeSO( 10 );
 //
 // Delay between data requests. Sort of.
 // The numberator, in milliseconds, is roughly the total time between reports.
-int             delay_time = 1000; 
+int             delay_time = 2000; 
 /////////////////////////////////////////////////////////////////////////////////////
 
 char            msg[1024];
@@ -52,6 +52,8 @@ void setup() {
 
     nodeSO.begin(9600);
     nodeSO.enableTXpin(D7);
+    
+    set_temp_setpoint( 50.0 );
 
 	sprintf( msg, "%s", "Starting Modbus Interface" );
 	log_msg( msg );
@@ -66,47 +68,61 @@ void loop() {
     gas_flow        co2_meter;
     fork_info       density_fork;
     temp_info       temp_ctl1;
-
+    
     check_error_state( err_count );
 
+    get_gateway_time( datestring );
+    sprintf( msg, "GATEWAY, t, %i, Date, %s", Time.now(), datestring );
+    if( datestring != "" )
+        log_msg( msg );
+    delay( delay_time );
+ 
     temp_ctl1 = get_temp_info();
     sprintf( msg, "TEMP CONTROLLER, t, %li, T, %0.1f, SP, %0.1f, OUT1, %0.1f", Time.now(), temp_ctl1.T, temp_ctl1.SP, temp_ctl1.OUT1 );
-    log_msg( msg );
+    if( temp_ctl1.T > 0 )
+        log_msg( msg );
     delay( delay_time );
 
-/*    get_gateway_time( datestring );
-    sprintf( msg, "GATEWAY, t, %i, Date, %s", Time.now(), datestring );
-    log_msg( msg );    delay( delay_time );
- */
-    
+    if( temp_ctl1.SP != 80.0 ) {
+        temp_ctl1.SP = 80.0;
+        set_temp_setpoint( temp_ctl1.SP );
+        delay( delay_time );
+    }
+
+    get_msg_stats();
+    delay( delay_time );
+/*    
     co2_meter = get_gas_flow();
     sprintf( msg, "GAS FLOW, t, %li, v, %0.1f, dv, %0.1f", Time.now(), co2_meter.v, co2_meter.dv );
     log_msg( msg );
     delay( delay_time );
-    
+ */ 
     density_fork = get_fork_info();
     sprintf( msg, "DENSITY FORK, t, %li, wet, %0.0f, f, %0.1f, T, %0.1f", Time.now(), density_fork.wet, density_fork.f, density_fork.T );
-    log_msg( msg );
+    if( density_fork.T > 0 )
+        log_msg( msg );
     delay( delay_time );
- 
-/*    sprintf( msg, "%li, %s, %0.0f, %0.2f, %0.2f, %0.2f, %0.2f, %0.1f, %0.1f, %0.1f",
-        Time.now(),
-        datestring,
-        density_fork.wet,
-        density_fork.f,
-        density_fork.T,
-        co2_meter.v,
-        co2_meter.dv,
-        temp_ctl1.T,
-        temp_ctl1.SP,
-        temp_ctl1.OUT1
-    );
-	log_msg( msg );
- */
+}
+
+ void set_temp_setpoint( float new_setpoint ) {   
+    uint8_t         result;
+    char            err[256];
+    uint16_t        new_SP;
+    
+    new_SP = (uint16_t) ( round(new_setpoint * 10.0) );
+
+    result = put_modbus_datum( nodeSO, 4098, new_SP );
+    if ( result == nodeSO.ku8MBSuccess )
+        sprintf( msg, "TEMP CONTROLLER, Setpoint set to %0.2f", new_setpoint );
+    else {
+        get_modbus_error( nodeSO, result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+    }
+    log_msg( msg );
 }
 
 void check_error_state( int err_count ) {
-    if( err_count > 5 ) {
+    if( err_count > 10 ) {
         normal.setActive(false);
         error.setActive(false);
         fail.setActive(true);
@@ -138,16 +154,22 @@ void get_modbus_error( ModbusMaster node, uint8_t result, char* err ) {
         sprintf( err, "Response Timed Out" );
     else if( result == node.ku8MBInvalidCRC )
         sprintf( err, "Invalid CRC" );
+    else  if ( result == nodeSO.ku8MBSuccess )
+        sprintf( err, "No error, dude!" );
     else
         sprintf( err, "Unidentified Error" );   
+}
+
+uint8_t put_modbus_datum( ModbusMaster node, uint16_t maddress, uint16_t mdata ) {
+    uint8_t     result;
+    
+    result = node.writeSingleRegister( maddress-1, mdata );
+    return( result );
 }
 
 uint8_t get_modbus_data3( ModbusMaster node, uint16_t data_buffer[], uint16_t maddress, uint16_t mqty ) {
     uint8_t     result;
 
-//  sprintf( msg, "node.readInputRegisters( %i, %i );", maddress, mqty );
-//  log_msg( msg );
-    
     result = node.readInputRegisters( maddress, mqty );
     if ( result == node.ku8MBSuccess ) {
 		for ( int j = 0; j < mqty; j++ )
@@ -160,9 +182,6 @@ uint8_t get_modbus_data3( ModbusMaster node, uint16_t data_buffer[], uint16_t ma
 
 uint8_t get_modbus_data4( ModbusMaster node, uint16_t data_buffer[], uint16_t maddress, uint16_t mqty ) {
     uint8_t     result;
-
-//  sprintf( msg, "node.readHoldingRegisters( %i, %i );", maddress, mqty );
-//  log_msg( msg );
 
     result = node.readHoldingRegisters( maddress, mqty );
     if ( result == node.ku8MBSuccess ) {
@@ -198,7 +217,7 @@ temp_info get_temp_info() {
     }
     delay(delay_time);
     
-    addr = 4115; // Output 1 %
+    addr = 4115; // Output 1 in %
     qty = 1;
 
     result = get_modbus_data4( nodeSO, data, addr-1, qty );
@@ -247,13 +266,7 @@ void get_msg_stats() {
     qty = 4;
     result = get_modbus_data4( nodeSG, data, addr-1, qty );
     if ( result == nodeSG.ku8MBSuccess ) {
-        sprintf( msg, "\t%i %s %i", 49007, "Messages Received", data[0] );
-     	log_msg( msg );
-
-        sprintf( msg, "\t%i %s %i", 49008, "Corrupt Messages Received", data[1] );
-     	log_msg( msg );
-
-        sprintf( msg, "\t%i %s %i", 49010, "Messages Sent",     data[3] );
+        sprintf( msg, "GATEWAY, t, %i, %s, %i, %s, %i, %s, %i", Time.now(), "Received", data[0], "Corrupt", data[1], "Sent", data[3] );
      	log_msg( msg );
     }
     else {
