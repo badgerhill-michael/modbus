@@ -19,7 +19,6 @@ gas_flow get_gas_flow();
 fork_info get_fork_info();
 temp_info get_temp_info();
 
-
 LEDStatus normal( RGB_COLOR_GREEN,  LED_PATTERN_FADE,  LED_SPEED_NORMAL );
 LEDStatus error(  RGB_COLOR_YELLOW, LED_PATTERN_BLINK, LED_SPEED_SLOW   );
 LEDStatus fail(   RGB_COLOR_RED,    LED_PATTERN_BLINK, LED_SPEED_FAST   );
@@ -181,4 +180,41 @@ void set_meter_value( int meter, float value ) {
 
     get_msg_stats();
     delay( delay_time );
+    
+    int get_autotune() {
+    uint8_t         result;
+    uint16_t        addr, qty, data[2];
+    char            err[256];
+    int             value;
+
+    addr = 2068;
+    qty = 1;
+
+    result = get_modbus_coils( nodeSO, data, addr, qty );
+    if ( result == nodeSO.ku8MBSuccess )
+        value = data[0];
+    else {
+        err_count++;
+        get_modbus_error( nodeSO, result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+        log_msg( msg );
+    }
+    return( value );
+}
+
+void set_autotune() {   
+    uint8_t         result;
+    char            err[256];
+
+    result = put_modbus_coil( nodeSO, 2068, 1 );
+    if ( result == nodeSO.ku8MBSuccess )
+        sprintf( msg, "TEMP CONTROLLER, Set autotune to %i", 1 );
+    else {
+        get_modbus_error( nodeSO, result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+    }
+    log_msg( msg );
+}
+
+
  */ 
