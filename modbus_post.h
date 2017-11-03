@@ -15,6 +15,19 @@ typedef struct temp_info {
   float OUT1;
 } temp_info;
 
+typedef struct emerson_data {
+    long    t;              // time in seconds since the epoch
+    float   cltp;           // volume of cold liquor tank in InchesOfH2O
+    float   cltt;           // temp of cold liquor tank in ˚F
+    float   hltp;           // volume of hot liquor tank in InchesOfH2O
+    float   hltt;           // temp of hot liquor tank in ˚F
+    float   fvp;            // 2" pressure gauge
+    float   fvt;            // 2" pressure gauge
+    float   mflowdv;        // Mag flow meter flow rate
+    float   mflowv;         // Mag flow meter totalized flow
+    char    datestring[64]; //Time from the gateway
+} emerson_data;
+
 gas_flow get_gas_flow();
 fork_info get_fork_info();
 temp_info get_temp_info();
@@ -45,52 +58,6 @@ float get_density() {
         log_msg( msg );
     }
     return( new_reading );
-}
-
-void get_msg_stats() {
-    uint8_t         result;
-    uint16_t        addr, qty, data[4];
-    char            err[256];
-
-    addr = 9007;
-    qty = 4;
-    result = get_modbus_data4( nodeSG, data, addr-1, qty );
-    if ( result == nodeSG.ku8MBSuccess ) {
-        sprintf( msg, "GATEWAY, %s, %i, %s, %i, %s, %i, t, %li", "Received", data[0], "Corrupt", data[1], "Sent", data[3], Time.now() );
-     	log_msg( msg );
-    }
-    else {
-        err_count++;
-        get_modbus_error( nodeSG, result, err );
-        sprintf( msg, "Error: %i (%X): %s", result, result, err );
-        log_msg( msg );
-    }
-}
-
-void get_gateway_time( char* date_string ) {
-    uint8_t         result;
-    uint16_t        data[32];
-    char            err[256];
-
-    int qty = 8;
-    result = get_modbus_data4( nodeSG, data, 9000, qty );
-    if ( result == nodeSG.ku8MBSuccess ) {
-        sprintf( date_string, "%02i/%02i/%i, %02i:%02i:%02i",
-            data[1],
-            data[2],
-            data[0],
-            data[3],
-            data[4],
-            data[5]
-        );
-    }
-    else {
-        err_count++;
-        sprintf( date_string, "%s", "" );
-        get_modbus_error( nodeSG, result, err );
-        sprintf( msg, "Error: %i (%X): %s", result, result, err );
-        log_msg( msg );
-    }
 }
 
 fork_info get_fork_info() {

@@ -3,42 +3,52 @@
 #include "modbus-post.h"
 #include <time.h>
 
+STARTUP( System.enableFeature(FEATURE_RETAINED_MEMORY) );
+
 /////////////////////////////////////////////////////////////////////////////////////
 // Slave ID = 255 refers to the gas mass flow meter
 ModbusMaster    nodeGF( 255 );  
 // Slave ID = 10 refers to a SOLO temp controller
-ModbusMaster    nodeSO( 10 ); 
+ModbusMaster    nodeSO( 20 ); 
 // Slave ID = 2 refers to the Emerson Smart Gateway in our particular configuration
 ModbusMaster    nodeSG( 2 ); 
 //
 // Delay between data requests. Sort of.
-int             delay_time = 2000;
 TCPClient       client;
-String          response;
+String          response = "";
 char            msg[512];
 int             err_count=0;
-int             temp_enabled    = 0;
-int             co2_enabled     = 1;
-int             gateway_enabled = 0;
+char            endpoint[128];
+char            url[256];
+
+retained int    delay_time      = 10000;
+retained int    temp_enabled    = 1;
+retained int    co2_enabled     = 0;
+retained int    gateway_enabled = 0;
 
 int cloudTempEnabled( String set_point );
 int cloudCO2Enabled( String set_point );
 int cloudGatewayEnabled( String set_point );
 
 void setup() {
-        if( temp_enabled )
-            nodeSO.begin(9600);
+    System.enableUpdates();
+    
+    nodeSO.begin(9600);
+    nodeGF.begin(9600);
+    nodeSG.begin(9600);
 
-        if( co2_enabled )
-            nodeGF.begin(9600);
-
-        if( gateway_enabled )
-            nodeSG.begin(9600);
-
+    sprintf( endpoint, "%s", "www.badgerhillbrewing.com" );
+    sprintf( url, "%s", "GET /modbus/index.php?accessKey=Fu47tMl9H2FOsAfdHJ6RFeJi2PQR7Lm6&bucketKey=KTYPDWRBG8S8" );
+    
     Particle.function( "setDelayTime", cloudSetDelayTime );
     Particle.variable( "delay_time", delay_time );
     
     Particle.function( "setTempCSP", cloudSetTempSetPoint );
+
+    Particle.function( "setEndPoint", cloudSetEndPoint );
+    Particle.variable( "endpoint", endpoint );
+    Particle.function( "setURL", cloudSetURL );
+    Particle.variable( "url", url );
 
     Particle.function( "TempON",    cloudTempEnabled );
     Particle.variable( "temp_enabled", temp_enabled );
@@ -49,8 +59,11 @@ void setup() {
     Particle.function( "GatewayON", cloudGatewayEnabled );
     Particle.variable( "SG_enabled", gateway_enabled );
 
-	sprintf( msg, "Starting %s version %0.1f", "Modbus", 0.1 );
+	sprintf( msg, "Starting %s version %0.1f", "Modbus", 0.2 );
 	log_msg( msg );
+	
+	report_wifi_stats( msg );
+    log_msg( msg );
 }
 
 void init_modbus() {
@@ -58,18 +71,16 @@ void init_modbus() {
 }
 
 void loop() {
-	char            datestring[256];
     gas_flow        co2_meter;
     temp_info       temp_ctl1;
     String          get_data_string;
 
-
     if( temp_enabled ) {
         temp_ctl1 = get_temp_info();
         if( temp_ctl1.T > -999.9 ) {
-            get_data_string = String( "sys=tempc10&T=") + String(temp_ctl1.T) + "&SP=" + String(temp_ctl1.SP) + "&OUT1=" + String(temp_ctl1.OUT1);
+            get_data_string = String( "&date_recorded=") + String(Time.now()) + String("&sys=tempc20&T=") + String(temp_ctl1.T) + "&SP=" + String(temp_ctl1.SP) + "&OUT1=" + String(temp_ctl1.OUT1);
             post_to_server( get_data_string );
-            log_msg( get_data_string );
+//            log_msg( get_data_string );
         }
     }
    
@@ -77,22 +88,30 @@ void loop() {
         co2_meter = get_gas_flow();
         if( co2_meter.v > -999.9 ) {
             float temporary_float = co2_meter.v;
-            get_data_string = String( "sys=co2_flow255&v=") + String(temporary_float/1000.0) + "&dv=" + String(co2_meter.dv);
+            get_data_string = String( "&date_recorded=") + String(Time.now()) + String( "&sys=co2_flow255&v=") + String(temporary_float/1000.0) + "&dv=" + String(co2_meter.dv);
             post_to_server( get_data_string );
-            log_msg( get_data_string );
+//            log_msg( get_data_string );
         }
     }
     
     if( gateway_enabled ) {
-        get_gateway_time( datestring );
-    
-        String d = String( datestring );
-        d = urlencode( d );
-        get_data_string = String( "sys=SmartGateway&Date=" + d  );
-        if( strlen(datestring) > 1 ) {
+        emerson_data *edata = (emerson_data *)calloc( 1, sizeof(emerson_data) );
+
+        int rtn = get_emerson_data( edata );
+        if( rtn == 0 ) {
+            get_data_string = "&date_recorded=" + String(Time.now()) + String( "&sys=SmartGateway2" ) +
+                "&cltp=" + String(edata->cltp) + 
+                "&cltt=" + String(edata->cltt) +
+                "&hltp=" + String(edata->hltp) +
+                "&hltt=" + String(edata->hltt) +
+                "&fvp=" + String(edata->fvp) +
+                "&fvt=" + String(edata->fvt) +
+                "&mflowdv=" + String(edata->mflowdv) +
+                "&mflowv=" + String(edata->mflowv);
             post_to_server( get_data_string );
-            log_msg( get_data_string );
+//            log_msg( get_data_string );
         }
+        free(edata);
     }
  
     for( int x = 0; x < delay_time; x+=500 ) {
@@ -102,7 +121,45 @@ void loop() {
     check_error_state( err_count );
 }
 
+int get_emerson_data( emerson_data *edata ) {
+    uint8_t         result;
+    uint16_t        data[16];
+	char            datestring[64];
+    char            err[256];
+    
+    int qty  = 16;
+    int addr = 0;
+    result = get_modbus_data3( nodeSG, data, addr, qty );
+    if ( result == nodeSG.ku8MBSuccess ) {
+        get_gateway_time( edata->datestring );
+        parse_emerson_data( data, edata );
+        return(0);
+    }
+    else {
+        err_count++;
+        get_modbus_error( nodeSG, result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+        log_msg( msg );
+        return(-1);
+    }
+}
+
+void parse_emerson_data( uint16_t data[16], emerson_data *edata ) {
+    edata->t        = Time.now();
+    edata->cltp     = convert_ints_to_float( &data[0] );
+    edata->cltt     = convert_ints_to_float( &data[2] );
+    edata->hltp     = convert_ints_to_float( &data[4] );
+    edata->hltt     = convert_ints_to_float( &data[6] );
+    edata->fvp      = convert_ints_to_float( &data[8] );
+    edata->fvt      = convert_ints_to_float( &data[10] );
+    edata->mflowdv  = convert_ints_to_float( &data[12] );
+    edata->mflowv   = convert_ints_to_float( &data[14] );
+}
+
 int cloudSetDelayTime( String set_point ) {
+    report_wifi_stats( msg );
+    log_msg( msg );
+    
     int new_value = set_point.toInt();
     if( new_value >= 0 ) {
         delay_time = new_value;
@@ -155,6 +212,16 @@ int cloudSetTempSetPoint( String set_point ) {
     }
     else
         return(-1);
+}
+
+int cloudSetEndPoint( String command ) {
+    command.toCharArray( endpoint, 128 );
+    return(1);
+}
+
+int cloudSetURL( String command ) {
+    command.toCharArray( url, 128 );
+    return(1);
 }
 
 void get_msg_stats() {
@@ -220,14 +287,28 @@ void set_temp_setpoint( float new_setpoint ) {
     log_msg( msg );
 }
 
+void report_wifi_stats( char* s ){
+    int signal_strength = WiFi.RSSI();
+    char* ssid          = (char *)WiFi.SSID();
+    IPAddress ip        = WiFi.localIP();
+    bool connected      = WiFi.ready();
+    sprintf( s, "%s %idb %i.%i.%i.%i", ssid, signal_strength, ip[0], ip[1], ip[2], ip[3] );
+    return;
+}
 void check_error_state( int err_count ) {
-    if( err_count > 10 ) {
+    if( err_count > 25 ) {
         normal.setActive(false);
         error.setActive(false);
         fail.setActive(true);
+        
+        report_wifi_stats( msg );
+        log_msg( msg );
+        delay( delay_time );
+
         sprintf( msg, "Too many errs (%i), rebooting.", err_count );
 	    log_msg( msg );
         delay( delay_time );
+        
         init_modbus();
         // The below will never execute...
         delay( delay_time );
@@ -387,31 +468,15 @@ float convert_ints_to_float( uint16_t* w ) {
 }
 
 void post_to_server( String get_parameters ) {
-    char    endpoint[128];
-    
-//      char*  endpoint = "insecure-groker.initialstate.com";
-//        char *endpoint = "10.0.1.212";
-//    sprintf( endpoint, "%s", "192.168.1.5" );
-    sprintf( endpoint, "%s", "10.0.1.212" );
-        
     if ( client.connect( endpoint, 80) ) {
-        sprintf( msg, "Posting to %s", endpoint );
-        log_msg( msg );
-        
-//        String get_data_string = String( "GET /api/events?accessKey=Fu47tMl9H2FOsAfdHJ6RFeJi2PQR7Lm6&bucketKey=KTYPDWRBG8S8&" );
-        String get_data_string = String( "GET /index.php?accessKey=Fu47tMl9H2FOsAfdHJ6RFeJi2PQR7Lm6&bucketKey=KTYPDWRBG8S8&" );
+        String get_data_string = String( url );
         get_data_string.concat( get_parameters );
-        get_data_string.concat( " HTTP/1.0" );
+        get_data_string.concat( " HTTP/1.1\r\n" );
+        get_data_string.concat( "Host: " + String(endpoint) + "\r\n" );
+        get_data_string.concat( "User-Agent: Arduino\r\n" );
+        get_data_string.concat( "Accept-Version: */*\r\n\r\n" );
         client.println( get_data_string );
-        
-        client.println( String( "Date: " + Time.timeStr() ) );
-        client.println( "User-Agent: Arduino" );
-        client.println( "Accept-Version: ~0" );
-        client.println( "Content-Type: application/x-www-form-urlencoded" );
-//        client.println( "Date: Thu, 28 Sep 2017 19:58:14 GMT" );
-//      client.println( "Retry-After: 10" );
-        client.println( "Content-Length: 0" );
-        client.println(  );
+        log_msg( String( String(endpoint )  + " " + get_data_string ) );
         get_server_response();
     }
     else {
@@ -422,9 +487,9 @@ void post_to_server( String get_parameters ) {
 
 void get_server_response() {
     char        *buffer;
-    size_t      size = 512;
+    size_t      sz = 512;
 
-    buffer = (char *) calloc( 1, size );
+    buffer = (char *) calloc( 1, sz );
     while( client.connected() ) {
         int new_bytes = client.available();
         if( new_bytes > 0 ) {
@@ -452,13 +517,13 @@ String urlencode( String iString ) {
 
 void log_msg( char* m ) {
 //    Serial.println( msg );
-    Particle.publish( "modbus-p02", m, 300, PRIVATE );
+    Particle.publish( "modbus", m, 300, PRIVATE );
     delay( 1000 );
 }
 
 void log_msg( String m ) {
-    m.toCharArray( msg, sizeof(msg) );
+    m.toCharArray( msg, 512 );
 //    Serial.println( msg );
-    Particle.publish( "modbus-p04", msg, 300, PRIVATE );
+    Particle.publish( "modbus", msg, 300, PRIVATE );
     delay( 1000 );
 }
