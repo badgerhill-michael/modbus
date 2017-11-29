@@ -1,0 +1,119 @@
+<?php
+
+	function setTempSetPoint( $setpoint ) {
+// 		curl https://api.particle.io/v1/devices/45003b00105136036373538/setTempCSP -d access_token=11f269af8c894898b5f297dec4b332b1940c4907 -d set_point=35
+	}
+	
+	function checkAuth( $aKey, $bKey) {
+		if( $aKey != "Fu47tMl9H2FOsAfdHJ6RFeJi2PQR7Lm6" ) {
+			die("Not found");
+		}
+		else if( $bKey != "KTYPDWRBG8S8" ) {
+				die("Not found");
+		}
+	}
+
+	function selectSensorReports( $link, $system_name, $parameter_name, $hours ) {
+	if( $hours < 1 )
+		$hours = $default_hours;
+			$sql = "SELECT date_recorded, parameter_value FROM	sensor_reports WHERE system_name = \"$system_name\" AND parameter_name = \"$parameter_name\" AND parameter_value < 900000 AND date_received >= now() - INTERVAL $hours HOUR ORDER BY date_recorded";
+			$result = mysqli_query( $link, $sql );
+
+			if( $result ) {
+	return( $result );
+			} else{
+				echo "ERROR: Could not execute $sql. " . mysqli_error($link);
+	return(-1);
+			}
+	}
+
+	function getChartHTML( $system_name, $parameter_name, $rows ) {
+		$html = <<<EOT
+
+<canvas id="$system_name$parameter_name" width="1080" height="240"></canvas>
+<script>
+var ctx = document.getElementById('$system_name$parameter_name').getContext('2d');
+var scatterChart = new Chart(ctx, {
+		type: 'scatter',
+		data: {
+				datasets: [{
+						label: '$system_name : $parameter_name',
+						backgroundColor: 'rgba( 200, 200, 200, 0.5 )',
+						borderColor: 'rgba( 0, 0, 0, 1.0 )',
+						pointRadius: 0,
+						lineTension: 0,
+						data: [
+EOT;
+
+		$row = mysqli_fetch_row( $rows );
+		$html .= sprintf( "{ x: moment.unix(%0.0f), y: %f }\n", $row[0], $row[1] );
+		while ($row = mysqli_fetch_row( $rows )) {
+	$html .= sprintf( ",{ x: moment.unix(%0.0f), y: %f }\n", $row[0], $row[1] );
+		}
+
+		$html .= <<<EOT
+]
+				}]
+		},
+		options: {
+		responsive: true,
+				scales: {
+						xAxes: [{
+								type: 'time',
+								position: 'bottom'
+						}]
+				}
+		}
+});
+</script>
+
+EOT;
+		return( $html );
+}
+
+	checkAuth( $_REQUEST["accessKey"], $_REQUEST["bucketKey"] );
+	$hours = 72;
+
+	if( $_REQUEST["hours"] )
+		$hours = $_REQUEST["hours"];
+	
+	$system_name = "tempc12";
+	if( $_REQUEST["system_name"] )
+		$system_name = $_REQUEST["system_name"];
+
+	$link = mysqli_connect("localhost", "badgerhi_mkmb", 'F52+@;~L9n$y', "badgerhi_modbus");
+	if($link === false){
+			die("ERROR: Could not connect. " . mysqli_connect_error());
+	}
+	$rows_T		 = selectSensorReports( $link, $system_name, "T", $hours );
+	$rows_SP	 = selectSensorReports( $link, $system_name, "SP", $hours );
+	$rows_OUT1   = selectSensorReports( $link, $system_name, "OUT1", $hours );
+
+	$html = <<<EOT
+<html>
+<script src="https://cdn.jsdelivr.net/npm/moment@2.19.1/moment.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.4.0/Chart.min.js"></script>
+<body>
+<p style="display:inline"><strong>Temperature Controller $system_name</strong><br/>
+Over the last <form id="frm1" action="tempc.php" style="display:inline">
+<input type="text" name="hours" value="$hours" size=5>
+<input type="hidden" name="accessKey" value="Fu47tMl9H2FOsAfdHJ6RFeJi2PQR7Lm6">
+<input type="hidden" name="bucketKey" value="KTYPDWRBG8S8">
+<input type="hidden" name="system_name" value="$system_name">
+</form> hours
+</p>
+EOT;
+
+	$html .= getChartHTML( $system_name, "T",		$rows_T );
+	$html .= getChartHTML( $system_name, "SP",		$rows_SP );
+	$html .= getChartHTML( $system_name, "OUT1", $rows_OUT1 );
+
+	$html .= <<<EOT
+</body>
+</html>
+EOT;
+
+	print($html);
+	mysqli_free_result($rows);
+	mysqli_close($link);
+?>

@@ -1,30 +1,65 @@
 // This #include statement was automatically added by the Particle IDE.
 #include "ModbusMaster.h"
 #include "modbus-post.h"
-#include <time.h>
+#include "modbus_functions.h"
 
 STARTUP( System.enableFeature(FEATURE_RETAINED_MEMORY) );
 
 /////////////////////////////////////////////////////////////////////////////////////
-// Slave ID = 255 refers to the gas mass flow meter
-ModbusMaster    nodeGF( 255 );  
-// Slave ID = 10 refers to a SOLO temp controller
-ModbusMaster    nodeSO( 20 ); 
-// Slave ID = 2 refers to the Emerson Smart Gateway in our particular configuration
+// Gas mass flow meter
+ModbusMaster    nodeGF( 255 );
+
+// Solo temp controllers
+int tempc_modbus_id_10 = 10;
+ModbusMaster    nodeSO10( tempc_modbus_id_10 ); 
+
+int tempc_modbus_id_11 = 11;
+ModbusMaster    nodeSO11( tempc_modbus_id_11 ); 
+
+int tempc_modbus_id_12 = 12;
+ModbusMaster    nodeSO12( tempc_modbus_id_12 ); 
+
+int tempc_modbus_id_13 = 13;
+ModbusMaster    nodeSO13( tempc_modbus_id_13 ); 
+
+int tempc_modbus_id_14 = 14;
+ModbusMaster    nodeSO14( tempc_modbus_id_14 ); 
+
+int tempc_modbus_id_15 = 15;
+ModbusMaster    nodeSO15( tempc_modbus_id_15 ); 
+
+int tempc_modbus_id_16 = 16;
+ModbusMaster    nodeSO16( tempc_modbus_id_16 ); 
+
+int tempc_modbus_id_17 = 17;
+ModbusMaster    nodeSO17( tempc_modbus_id_17 ); 
+
+int tempc_modbus_id_18 = 18;
+ModbusMaster    nodeSO18( tempc_modbus_id_18 ); 
+
+int tempc_modbus_id_19 = 19;
+ModbusMaster    nodeSO19( tempc_modbus_id_19 ); 
+
+int tempc_modbus_id_20 = 20;
+ModbusMaster    nodeSO20( tempc_modbus_id_20 ); 
+
+int tempc_modbus_id_21 = 21;
+ModbusMaster    nodeSO21( tempc_modbus_id_21 ); 
+
+// Emerson Smart Gateway
 ModbusMaster    nodeSG( 2 ); 
-//
-// Delay between data requests. Sort of.
-TCPClient       client;
+/////////////////////////////////////////////////////////////////////////////////////
+
 String          response = "";
 char            msg[512];
 int             err_count=0;
 char            endpoint[128];
 char            url[256];
 
-retained int    delay_time      = 10000;
+retained int    delay_time      = 1000;
 retained int    temp_enabled    = 1;
 retained int    co2_enabled     = 0;
-retained int    gateway_enabled = 0;
+retained int    gateway_enabled = 1;
 
 int cloudTempEnabled( String set_point );
 int cloudCO2Enabled( String set_point );
@@ -33,22 +68,29 @@ int cloudGatewayEnabled( String set_point );
 void setup() {
     System.enableUpdates();
     
-    nodeSO.begin(9600);
+    nodeSO10.begin(9600);
+    nodeSO11.begin(9600);
+    nodeSO12.begin(9600);
+    nodeSO13.begin(9600);
+    nodeSO14.begin(9600);
+    nodeSO15.begin(9600);
+    nodeSO16.begin(9600);
+    nodeSO17.begin(9600);
+    nodeSO18.begin(9600);
+    nodeSO19.begin(9600);
+    nodeSO20.begin(9600);
+//    nodeSO21.begin(9600);
+
     nodeGF.begin(9600);
     nodeSG.begin(9600);
 
     sprintf( endpoint, "%s", "www.badgerhillbrewing.com" );
-    sprintf( url, "%s", "GET /modbus/index.php?accessKey=Fu47tMl9H2FOsAfdHJ6RFeJi2PQR7Lm6&bucketKey=KTYPDWRBG8S8" );
+    sprintf( url, "%s", "GET /modbus/post.php?accessKey=Fu47tMl9H2FOsAfdHJ6RFeJi2PQR7Lm6&bucketKey=KTYPDWRBG8S8" );
     
     Particle.function( "setDelayTime", cloudSetDelayTime );
     Particle.variable( "delay_time", delay_time );
     
     Particle.function( "setTempCSP", cloudSetTempSetPoint );
-
-    Particle.function( "setEndPoint", cloudSetEndPoint );
-    Particle.variable( "endpoint", endpoint );
-    Particle.function( "setURL", cloudSetURL );
-    Particle.variable( "url", url );
 
     Particle.function( "TempON",    cloudTempEnabled );
     Particle.variable( "temp_enabled", temp_enabled );
@@ -71,26 +113,30 @@ void init_modbus() {
 }
 
 void loop() {
-    gas_flow        co2_meter;
-    temp_info       temp_ctl1;
-    String          get_data_string;
+    String      get_data_string;
+    gas_flow    co2_meter;
 
     if( temp_enabled ) {
-        temp_ctl1 = get_temp_info();
-        if( temp_ctl1.T > -999.9 ) {
-            get_data_string = String( "&date_recorded=") + String(Time.now()) + String("&sys=tempc20&T=") + String(temp_ctl1.T) + "&SP=" + String(temp_ctl1.SP) + "&OUT1=" + String(temp_ctl1.OUT1);
-            post_to_server( get_data_string );
-//            log_msg( get_data_string );
-        }
+        read_and_post_tempc( tempc_modbus_id_10, nodeSO10 );
+        read_and_post_tempc( tempc_modbus_id_11, nodeSO11 );
+        read_and_post_tempc( tempc_modbus_id_12, nodeSO12 );
+        read_and_post_tempc( tempc_modbus_id_13, nodeSO13 );
+        read_and_post_tempc( tempc_modbus_id_14, nodeSO14 );
+        read_and_post_tempc( tempc_modbus_id_15, nodeSO15 );
+        read_and_post_tempc( tempc_modbus_id_16, nodeSO16 );
+        read_and_post_tempc( tempc_modbus_id_17, nodeSO17 );
+        read_and_post_tempc( tempc_modbus_id_18, nodeSO18 );
+        read_and_post_tempc( tempc_modbus_id_19, nodeSO19 );
+        read_and_post_tempc( tempc_modbus_id_20, nodeSO20 );
+ //       read_and_post_tempc( tempc_modbus_id_21, nodeSO21 );
     }
    
     if( co2_enabled ) {
         co2_meter = get_gas_flow();
         if( co2_meter.v > -999.9 ) {
             float temporary_float = co2_meter.v;
-            get_data_string = String( "&date_recorded=") + String(Time.now()) + String( "&sys=co2_flow255&v=") + String(temporary_float/1000.0) + "&dv=" + String(co2_meter.dv);
+            get_data_string = String( "&date_recorded=") + String(Time.now()) + "&system_name=co2_flow&system_id=255&v=" +String(temporary_float/1000.0) + "&dv=" + String(co2_meter.dv);
             post_to_server( get_data_string );
-//            log_msg( get_data_string );
         }
     }
     
@@ -99,7 +145,7 @@ void loop() {
 
         int rtn = get_emerson_data( edata );
         if( rtn == 0 ) {
-            get_data_string = "&date_recorded=" + String(Time.now()) + String( "&sys=SmartGateway2" ) +
+            get_data_string = "&date_recorded=" + String(Time.now()) + String( "&system_name=SmartGateway&system_id=2" ) +
                 "&cltp=" + String(edata->cltp) + 
                 "&cltt=" + String(edata->cltt) +
                 "&hltp=" + String(edata->hltp) +
@@ -119,6 +165,20 @@ void loop() {
         delay( 500 );
     }
     check_error_state( err_count );
+}
+
+void read_and_post_tempc( int id, ModbusMaster node ) {
+    String      get_data_string;
+    temp_info   temp_ctl1 = get_temp_info( node );
+    
+    if( temp_ctl1.T > -999.9 ) {
+        get_data_string = String( "&date_recorded=") + String(Time.now()) + "&system_name=tempc&system_id=" + String(id) 
+            +"&T=" + String(temp_ctl1.T) + "&SP=" + String(temp_ctl1.SP) + "&OUT1=" + String(temp_ctl1.OUT1);
+//            + "&Alarm1=" + String(temp_ctl1.Alarm1);
+        post_to_server( get_data_string );
+        sprintf( msg, "tempc%d=%3.1f", id, temp_ctl1.T );
+        log_msg( msg );
+    }
 }
 
 int get_emerson_data( emerson_data *edata ) {
@@ -204,10 +264,13 @@ int cloudGatewayEnabled( String set_point ) {
         return(-1);
 }
 
-int cloudSetTempSetPoint( String set_point ) {
-    float new_value = set_point.toFloat();
+int cloudSetTempSetPoint( String command ) {
+    String sid = command.substring( 0, command.indexOf( ":" ) );
+    String sp  = command.substring( command.indexOf( ":" )+1 );
+    int system_id = sid.toInt();
+    float new_value = sp.toFloat();
     if( new_value >= 0 ) {
-        set_temp_setpoint( new_value );
+        set_temp_setpoint( system_id, new_value );
         return( 1 );
     }
     else
@@ -270,18 +333,44 @@ void get_gateway_time( char* date_string ) {
     }
 }
 
-void set_temp_setpoint( float new_setpoint ) {   
+void set_temp_setpoint( int system_id, float new_setpoint ) {   
     uint8_t         result;
     char            err[256];
     uint16_t        new_SP;
-    
+    ModbusMaster    node;
+
+    if( system_id == tempc_modbus_id_10 )
+        node = nodeSO10;
+    else if( system_id == tempc_modbus_id_11 )
+        node = nodeSO11;
+    else if( system_id == tempc_modbus_id_12 )
+        node = nodeSO12;
+    else if( system_id == tempc_modbus_id_13 )
+        node = nodeSO13;
+    else if( system_id == tempc_modbus_id_14 )
+        node = nodeSO14;
+    else if( system_id == tempc_modbus_id_15 )
+        node = nodeSO15;
+    else if( system_id == tempc_modbus_id_16 )
+        node = nodeSO16;
+    else if( system_id == tempc_modbus_id_17 )
+        node = nodeSO17;
+    else if( system_id == tempc_modbus_id_18 )
+        node = nodeSO18;
+    else if( system_id == tempc_modbus_id_19 )
+        node = nodeSO19;
+    else if( system_id == tempc_modbus_id_20 )
+        node = nodeSO20;
+    else if( system_id == tempc_modbus_id_21 )
+        node = nodeSO21;
+        
     new_SP = (uint16_t) ( round(new_setpoint * 10.0) );
 
-    result = put_modbus_datum( nodeSO, 4098, new_SP );
-    if ( result == nodeSO.ku8MBSuccess )
-        sprintf( msg, "TEMP CONTROLLER, Setpoint set to %0.2f", new_setpoint );
+    result = put_modbus_datum( node, 4098, new_SP );
+    if ( result == node.ku8MBSuccess )
+        sprintf( msg, "Setpoint set to %0.2f on system_id %i", new_setpoint, system_id );
     else {
-        get_modbus_error( nodeSO, result, err );
+        get_modbus_error( node, result, err );
         sprintf( msg, "Error: %i (%X): %s", result, result, err );
     }
     log_msg( msg );
@@ -291,7 +380,6 @@ void report_wifi_stats( char* s ){
     int signal_strength = WiFi.RSSI();
     char* ssid          = (char *)WiFi.SSID();
     IPAddress ip        = WiFi.localIP();
-    bool connected      = WiFi.ready();
     sprintf( s, "%s %idb %i.%i.%i.%i", ssid, signal_strength, ip[0], ip[1], ip[2], ip[3] );
     return;
 }
@@ -301,10 +389,6 @@ void check_error_state( int err_count ) {
         error.setActive(false);
         fail.setActive(true);
         
-        report_wifi_stats( msg );
-        log_msg( msg );
-        delay( delay_time );
-
         sprintf( msg, "Too many errs (%i), rebooting.", err_count );
 	    log_msg( msg );
         delay( delay_time );
@@ -334,65 +418,13 @@ void get_modbus_error( ModbusMaster node, uint8_t result, char* err ) {
         sprintf( err, "Response Timed Out" );
     else if( result == node.ku8MBInvalidCRC )
         sprintf( err, "Invalid CRC" );
-    else  if ( result == nodeSO.ku8MBSuccess )
+    else  if ( result == node.ku8MBSuccess )
         sprintf( err, "No error, dude!" );
     else
         sprintf( err, "Unidentified Error" );   
 }
 
-uint8_t put_modbus_datum( ModbusMaster node, uint16_t maddress, uint16_t mdata ) {
-    uint8_t     result;
-    
-    result = node.writeSingleRegister( maddress-1, mdata );
-    return( result );
-}
-
-uint8_t  put_modbus_coil( ModbusMaster node, uint16_t maddress, uint16_t mdata ) {
-    uint8_t     result;
-    result = node.writeSingleCoil( maddress-1, mdata );
-    return( result );
-}
-
-uint8_t get_modbus_data3( ModbusMaster node, uint16_t data_buffer[], uint16_t maddress, uint16_t mqty ) {
-    uint8_t     result;
-
-    result = node.readInputRegisters( maddress, mqty );
-    if ( result == node.ku8MBSuccess ) {
-		for ( int j = 0; j < mqty; j++ )
-			data_buffer[j] = node.getResponseBuffer( j );
-	}
-	node.clearResponseBuffer();
-    node.clearTransmitBuffer();
-    return( result );
-}
-
-uint8_t get_modbus_coils( ModbusMaster node, uint16_t data_buffer[], uint16_t maddress, uint16_t mqty ) {
-    uint8_t     result;
-
-    result = node.readCoils( maddress-1, mqty );
-    if ( result == node.ku8MBSuccess ) {
-		for ( int j = 0; j < mqty; j++ )
-			data_buffer[j] = node.getResponseBuffer( j );
-	}
-	node.clearResponseBuffer();
-    node.clearTransmitBuffer();
-	return( result );
-}
-
-uint8_t get_modbus_data4( ModbusMaster node, uint16_t data_buffer[], uint16_t maddress, uint16_t mqty ) {
-    uint8_t     result;
-
-    result = node.readHoldingRegisters( maddress, mqty );
-    if ( result == node.ku8MBSuccess ) {
-		for ( int j = 0; j < mqty; j++ )
-			data_buffer[j] = node.getResponseBuffer( j );
-	}
-	node.clearResponseBuffer();
-    node.clearTransmitBuffer();
-	return( result );
-}
-
-temp_info get_temp_info() {
+temp_info get_temp_info( ModbusMaster node ) {
     uint8_t         result;
     uint16_t        addr, qty, data[2];
     char            err[256];
@@ -401,18 +433,20 @@ temp_info get_temp_info() {
     new_reading.T = -999.9;
     new_reading.SP = -999.9;
     new_reading.OUT1 = -999.9;
+//    new_reading.Alarm1 = -999;
+
 
     addr = 4097;// Current temp
     qty = 2;
 
-    result = get_modbus_data4( nodeSO, data, addr-1, qty );
-    if ( result == nodeSO.ku8MBSuccess ) {
+    result = get_modbus_data4( node, data, addr-1, qty );
+    if ( result == node.ku8MBSuccess ) {
         new_reading.T  = data[0]/10.0;
         new_reading.SP = data[1]/10.0;
     }
     else {
         err_count++;
-        get_modbus_error( nodeSO, result, err );
+        get_modbus_error( node, result, err );
         sprintf( msg, "Error: %i (%X): %s", result, result, err );
         log_msg( msg );
     }
@@ -421,16 +455,32 @@ temp_info get_temp_info() {
     addr = 4115; // Output 1 in %
     qty = 1;
 
-    result = get_modbus_data4( nodeSO, data, addr-1, qty );
-    if ( result == nodeSO.ku8MBSuccess ) {
+    result = get_modbus_data4( node, data, addr-1, qty );
+    if ( result == node.ku8MBSuccess ) {
         new_reading.OUT1  = data[0]/10.0;
     }
     else {
         err_count++;
-        get_modbus_error( nodeSO, result, err );
+        get_modbus_error( node, result, err );
         sprintf( msg, "Error: %i (%X): %s", result, result, err );
         log_msg( msg );
     }
+    delay(1000);
+
+/*    addr = 4129; // Alarm 1
+    qty = 1;
+
+    result = get_modbus_data4( node, data, addr-1, qty );
+    if ( result == node.ku8MBSuccess ) {
+        new_reading.Alarm1  = data[0];
+    }
+    else {
+        err_count++;
+        get_modbus_error( node, result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+        log_msg( msg );
+    }
+ */
     return( new_reading );
 }
 
@@ -468,6 +518,7 @@ float convert_ints_to_float( uint16_t* w ) {
 }
 
 void post_to_server( String get_parameters ) {
+    TCPClient client;
     if ( client.connect( endpoint, 80) ) {
         String get_data_string = String( url );
         get_data_string.concat( get_parameters );
@@ -476,8 +527,8 @@ void post_to_server( String get_parameters ) {
         get_data_string.concat( "User-Agent: Arduino\r\n" );
         get_data_string.concat( "Accept-Version: */*\r\n\r\n" );
         client.println( get_data_string );
-        log_msg( String( String(endpoint )  + " " + get_data_string ) );
-        get_server_response();
+//        log_msg( String( get_data_string ) );
+        get_server_response( client );
     }
     else {
         sprintf( msg, "%s", "Connection failed." );
@@ -485,22 +536,22 @@ void post_to_server( String get_parameters ) {
     }
 }
 
-void get_server_response() {
+void get_server_response( TCPClient connection ) {
     char        *buffer;
     size_t      sz = 512;
 
     buffer = (char *) calloc( 1, sz );
-    while( client.connected() ) {
-        int new_bytes = client.available();
+    while( connection.connected() ) {
+        int new_bytes = connection.available();
         if( new_bytes > 0 ) {
-            client.read( (uint8_t *)buffer, new_bytes );
+            connection.read( (uint8_t *)buffer, new_bytes );
             String s = String( buffer );
             response.concat( s );
         }
         Particle.process();
     }
-    log_msg( response );
-    client.stop();
+    log_msg( "Result code: " + response.substring(9,12) );
+    connection.stop();
     response = "";
     free(buffer);
 }
@@ -513,6 +564,28 @@ String urlencode( String iString ) {
     oString.replace( ":", "%3A" );
     
     return( oString );
+}
+
+fork_info get_fork_info() {
+	uint8_t         result;
+	uint16_t        data[16];
+    char            err[256];
+    fork_info       new_reading;
+
+    int qty = 6;
+    result = get_modbus_data4( nodeSG, data, 0, qty );
+    if ( result == nodeSG.ku8MBSuccess ) {
+        new_reading.wet = convert_ints_to_float(&data[0]);
+        new_reading.f   = convert_ints_to_float(&data[2]);
+        new_reading.T   = convert_ints_to_float(&data[4]);
+    }
+    else {
+        err_count++;
+        get_modbus_error( nodeSG, result, err );
+        sprintf( msg, "Error: %i (%X): %s", result, result, err );
+        log_msg( msg );
+    }
+    return( new_reading );
 }
 
 void log_msg( char* m ) {
