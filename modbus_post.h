@@ -1,3 +1,11 @@
+#if ( PLATFORM_ID == PLATFORM_ELECTRON_PRODUCTION )
+    #define THIS_DEVICE "electron"
+#endif
+
+#if ( PLATFORM_ID == PLATFORM_PHOTON_PRODUCTION )
+    #define THIS_DEVICE "photon"
+#endif
+
 typedef struct gas_flow {
   float dv;
   float v;
@@ -11,6 +19,8 @@ typedef struct ph {
 typedef struct humidity {
   float T;
   float humidity;
+  double SP;
+  float OUT1;
 } humidity;
 
 typedef struct fork_info {
@@ -35,6 +45,24 @@ typedef struct devil_info {
   float humidity;
 } devil_info;
 
+/*
+    edata->t        = Time.now();
+    edata->cltp     = convert_ints_to_float( &data[0] );
+    edata->cltt     = convert_ints_to_float( &data[2] );
+    edata->hltp     = convert_ints_to_float( &data[4] );
+    edata->hltt     = convert_ints_to_float( &data[6] );
+    edata->fvp      = convert_ints_to_float( &data[8] );
+    edata->fvt      = convert_ints_to_float( &data[10] );
+    edata->mflowdv  = convert_ints_to_float( &data[12] );
+    edata->mflowv   = convert_ints_to_float( &data[14] );
+    edata->mflowt   = convert_ints_to_float( &data[16] );
+    edata->phyg1p   = convert_ints_to_float( &data[18] );
+    edata->phyg1t   = convert_ints_to_float( &data[20] );
+    edata->fork_wet = convert_ints_to_float( &data[22] );
+    edata->fork_hz  = convert_ints_to_float( &data[24] );
+    edata->fork_t   = convert_ints_to_float( &data[26] );
+ */
+ 
 typedef struct emerson_data {
     long    t;              // time in seconds since the epoch
     float   cltp;           // volume of cold liquor tank in InchesOfH2O
@@ -45,7 +73,13 @@ typedef struct emerson_data {
     float   fvt;            // 2" pressure gauge
     float   mflowdv;        // Mag flow meter flow rate
     float   mflowv;         // Mag flow meter totalized flow
-    char    datestring[64]; //Time from the gateway
+    float   mflowt;         // Mag flow meter temp
+    float   phyg1p;         // Mag flow meter temp
+    float   phyg1t;         // Mag flow meter temp
+    float   forkwet;       // Is the density fork wet?
+    float   forkhz;        // Density fork frequency
+    float   forkt;         // Density fork temp
+//    char    datestring[64]; //Time from the gateway
 } emerson_data;
 
 gas_flow get_gas_flow();

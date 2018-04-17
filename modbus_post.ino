@@ -1,5 +1,5 @@
 // This #include statement was automatically added by the Particle IDE.
-#include <MQTT.h>
+//#include <MQTT.h>
 
 // This #include statement was automatically added by the Particle IDE.
 #include "ModbusMaster.h"
@@ -14,12 +14,26 @@ int gas_flow_meter_id = 255;
 ModbusMaster    nodeGF( gas_flow_meter_id );
 
 // CO2 Watchdog
-int co2c_modbus_id_01 = 1;
-ModbusMaster    nodeSO01( co2c_modbus_id_01 ); 
+int co2_watchdog_modbus_id = 1;
+ModbusMaster    nodeCO2watchdog( co2_watchdog_modbus_id ); 
+
+// Emerson Smart Gateway
+int smart_gateway_modbus_id = 2;
+ModbusMaster    nodeSG( smart_gateway_modbus_id ); 
 
 // pH Meter
 int ph_modbus_id_03 = 3;
 ModbusMaster    nodeSO03( ph_modbus_id_03 ); 
+
+// Humidity Sensor
+int humidity_modbus_id = 4;
+ModbusMaster    nodeHumidity( humidity_modbus_id ); 
+
+// Humidity Sensor 2
+ModbusMaster    nodeHum2( 5 ); 
+
+// Temp sensor
+ModbusMaster    nodeTEMP( 7 );
 
 // Solo temp controllers
 int tempc_modbus_id_10 = 10;
@@ -58,8 +72,6 @@ ModbusMaster    nodeSO20( tempc_modbus_id_20 );
 int tempc_modbus_id_21 = 21;
 ModbusMaster    nodeSO21( tempc_modbus_id_21 ); 
 
-// Emerson Smart Gateway
-ModbusMaster    nodeSG( 2 ); 
 /////////////////////////////////////////////////////////////////////////////////////
 
 String          response = "";
@@ -70,14 +82,16 @@ char            endpoint[128];
 char            url[256];
 String          version;
 char            MQTT_TOPIC[512];
+int             txdata;
 
-retained int    delay_time          = 130000;
+retained int    delay_time          = 500;
 retained int    temp_enabled        = 1;
-retained int    co2_enabled         = 0;
-retained int    gateway_enabled     = 0;
-retained int    humidity_enabled    = 0;
+retained int    co2_enabled         = 1;
+retained int    gateway_enabled     = 1;
+retained int    humidity_enabled    = 1;
 retained int    density_enabled     = 0;
 retained int    ph_enabled          = 0;
+//retained double  humidity_setpoint   = 32.0;
 
 int cloudTempEnabled( String set_point );
 int cloudCO2Enabled( String set_point );
@@ -88,9 +102,11 @@ int cloudpHEnabled( String set_point );
 int cloudModbusRead( String params );
 int cloudModbusWrite( String params );
 
-char* mqtt_server = "test.mosquitto.org";
-void callback(char* topic, byte* payload, unsigned int length);
+//char* mqtt_server = "test.mosquitto.org";
+//void callback(char* topic, byte* payload, unsigned int length);
+uint32_t convert_ints_to_int( uint16_t* w );
 
+/*
 MQTT mqtt_client( mqtt_server, 1883, callback );
 
 // recieve message
@@ -101,24 +117,25 @@ void callback(char* topic, byte* payload, unsigned int length) {
     log_msg( p );
     delay(1000);
 }
+*/
 
 void setup() {
-    sprintf( MQTT_TOPIC, "badgerhillbrewing-com/%i/messages", device_number(System.deviceID()) );
+#if ( PLATFORM_ID == PLATFORM_ELECTRON_PRODUCTION )
+//    Cellular.on();
+    int txdata = get_cell_usage();
+#endif
+ //   sprintf( MQTT_TOPIC, "badgerhillbrewing-com/%i/messages", device_number(System.deviceID()) );
 
-    mqtt_client.setBroker( mqtt_server, 1883 );
-    mqtt_client.connect( System.deviceID() );
+//    mqtt_client.setBroker( mqtt_server, 1883 );
+//    mqtt_client.connect( System.deviceID() );
 
-    version = "modbus_post-" + Time.format( Time.now(), TIME_FORMAT_ISO8601_FULL );
-	log_msg( "Version: " + version );
-
-//    nodeSO01.begin(4800);
-//    nodeSO03.begin(4800);
-//    nodeSO21.begin(9600);
+    version = String(System.deviceID()) + "_" + Time.format( Time.now(), TIME_FORMAT_ISO8601_FULL );
 
     nodeGF.begin(9600);
     nodeSG.begin(9600);
-   
-    nodeSO01.begin(9600);
+    nodeHumidity.begin(9600);
+    nodeHum2.begin(9600);
+    nodeTEMP.begin(9600);
     nodeSO10.begin(9600);
     nodeSO11.begin(9600);
     nodeSO12.begin(9600);
@@ -131,11 +148,15 @@ void setup() {
     nodeSO19.begin(9600);
     nodeSO20.begin(9600);
     nodeSO21.begin(9600);
-
+  
     sprintf( endpoint, "%s", "www.badgerhillbrewing.com" );
     
+//    char *aKey = "Unmapped";
+//    char* bKey = "Beerpeople";
+
 //    char *aKey = "SOCIABLE";
 //    char *bKey = "CIDERWERKS";
+
     char *aKey = "Fu47tMl9H2FOsAfdHJ6RFeJi2PQR7Lm6";
     char* bKey = "KTYPDWRBG8S8";
     
@@ -168,34 +189,52 @@ void setup() {
 
     Particle.variable( "err_count", err_count );
 
-	report_wifi_stats( msg );
+	report_connection_stats( msg );
     log_msg( msg );
+    
+/*    Particle.function( "setHumSP", cloudSetHumSetPoint );
+    Particle.variable( "humiditySP", humidity_setpoint );
+    pinMode( D2, OUTPUT );
+    digitalWrite( D2, LOW );
+ */
 }
 
 void loop() {
-	log_msg( "Loop Start: " + Time.format( Time.now(), TIME_FORMAT_ISO8601_FULL ) );
-	
+    sprintf( msg, "" );
+#if ( PLATFORM_ID == PLATFORM_ELECTRON_PRODUCTION )
+    int data = get_cell_usage();
+    sprintf( msg, ",%d", data-txdata );
+    txdata=data;
+#endif 
+    log_msg( String(Time.now()) + String(msg)  );
+    
 	String get_data_string = "&reported_by=" + version;
     
+/*    float new_temp = get_temp( nodeTEMP );
+    if( new_temp > -999.9 ) {
+        get_data_string += "&date_recorded=" + String(Time.now()) + "&system_name=tempc&system_id=7&T=" + String::format( "%0.2f", new_temp);
+        post_to_server( get_data_string );
+    }
+ */
+
     if( co2_enabled ) {
         gas_flow co2_meter = get_gas_flow( nodeGF );
         if( co2_meter.v > -999.9 ) {
             float temporary_float = co2_meter.v;
-            String values = "system_name=co2_flow&system_id=" + String(gas_flow_meter_id) + "&v=" + String(temporary_float/1000.0) + "&dv=" + String(co2_meter.dv);
+            String values = "system_name=co2_flow&system_id=" + String(gas_flow_meter_id) + "&v=" + String::format( "%07.4f", temporary_float/1000.0 ) + "&dv=" + String::format( "%06.4f", co2_meter.dv );
             post_to_server( get_data_string + "&date_recorded=" + String(Time.now()) + "&" + values );
-            log_msg( values );
+//            log_msg( values );
         }
-        check_error_state();
     }
 
-    if( density_enabled ) {
-        devil_info density_sensor = get_devil_info( nodeSO01 );
-        if( density_sensor.T > -999.9 ) {
-            get_data_string += "&date_recorded=" + String(Time.now()) + "&system_name=devil&system_id=1&T=" + String(density_sensor.T) + "&density=" + String(density_sensor.rho);
-            post_to_server( get_data_string );
-        }
-        check_error_state();
-    }
+//    if( density_enabled ) {
+//        devil_info density_sensor = get_devil_info( nodeDEVIL );
+//        if( density_sensor.T > -999.9 ) {
+//            String values = "system_name=devil&system_id=1&T=" + String(density_sensor.T) + "&density=" + String(density_sensor.rho);
+//            post_to_server( get_data_string + "&date_recorded=" + String(Time.now()) + "&" + values );
+//            log_msg( values );
+//        }
+//    }
     
     if( gateway_enabled ) {
         emerson_data *edata = (emerson_data *)calloc( 1, sizeof(emerson_data) );
@@ -209,23 +248,35 @@ void loop() {
                 "&fvp=" + String::format( "%0.2f", edata->fvp) +
                 "&fvt=" + String::format( "%0.2f", edata->fvt) +
                 "&mflowdv=" + String::format( "%0.2f", edata->mflowdv) +
-                "&mflowv=" + String::format( "%0.2f", edata->mflowv);
+                "&mflowv=" + String::format( "%0.2f", edata->mflowv) +
+                "&mflowt=" + String::format( "%0.2f", edata->mflowt) +
+                "&phyg1p=" + String::format( "%0.3f", edata->phyg1p) +
+                "&phyg1t=" + String::format( "%0.2f", edata->phyg1t) +
+                "&forkwet=" + String::format( "%0.2f", edata->forkwet) +
+                "&forkhz=" + String::format( "%0.2f", edata->forkhz) +
+                "&forkt=" + String::format( "%0.2f", edata->forkt ); 
             post_to_server( get_data_string + "&date_recorded=" + String(Time.now()) + "&" + values );
-            log_msg( values );
+//            log_msg( values );
         }
         free(edata);
-        check_error_state();
     }
     
     if( humidity_enabled ) {
-        humidity humidity_meter = get_humidity( nodeSO01 );
+        humidity humidity_meter = get_humidity( nodeHumidity );
         if( humidity_meter.T > -999.9 ) {
-            get_data_string += "&date_recorded=" + String(Time.now()) + "&system_name=humidity&system_id=1&humidity="
-                + String(humidity_meter.humidity) + "&T=" + String(humidity_meter.T);
+            get_data_string += "&date_recorded=" + String(Time.now()) + "&system_name=humidity&system_id=" + String(humidity_modbus_id) + "&humidity="
+                + String::format( "%0.1f", humidity_meter.humidity) + "&T=" + String::format( "%0.2f", humidity_meter.T );
             post_to_server( get_data_string );
-            log_msg( "humidity=" + String(humidity_meter.humidity) + "&T=" + String(humidity_meter.T) );
+ //         log_msg( get_data_string );
         }
-        check_error_state();
+        humidity_meter = get_humidity( nodeHum2 );
+        if( humidity_meter.T > -999.9 ) {
+            get_data_string += "&date_recorded=" + String(Time.now()) + "&system_name=humidity&system_id=" + String(5) + "&humidity="
+                + String::format( "%0.1f", humidity_meter.humidity) + "&T=" + String::format( "%0.2f", humidity_meter.T );
+            post_to_server( get_data_string );
+ //         log_msg( get_data_string );
+        }
+
     }
 
     if( ph_enabled ) {
@@ -234,13 +285,12 @@ void loop() {
             get_data_string += "&date_recorded=" + String(Time.now()) + "&system_name=ph&system_id=3&ph="
                 + String(ph_meter.ph) + "&T=" + String(ph_meter.T);
             post_to_server( get_data_string );
-            log_msg( "ph=" + String(ph_meter.ph) + "&T=" + String(ph_meter.T) );
+//            log_msg( "ph=" + String(ph_meter.ph) + "&T=" + String(ph_meter.T) );
         }
-        check_error_state();
     }
 
     if( temp_enabled ) {
-/*      read_and_post_tempc(  co2c_modbus_id_01, nodeSO01, get_data_string );
+        read_and_post_tempc(  co2_watchdog_modbus_id, nodeCO2watchdog, get_data_string );
         read_and_post_tempc( tempc_modbus_id_10, nodeSO10, get_data_string );
         read_and_post_tempc( tempc_modbus_id_11, nodeSO11, get_data_string );
         read_and_post_tempc( tempc_modbus_id_12, nodeSO12, get_data_string );
@@ -249,21 +299,22 @@ void loop() {
         read_and_post_tempc( tempc_modbus_id_15, nodeSO15, get_data_string );
         read_and_post_tempc( tempc_modbus_id_16, nodeSO16, get_data_string );
         read_and_post_tempc( tempc_modbus_id_17, nodeSO17, get_data_string );
-        read_and_post_tempc( tempc_modbus_id_18, nodeSO18, get_data_string );
+//        read_and_post_tempc( tempc_modbus_id_18, nodeSO18, get_data_string );
         read_and_post_tempc( tempc_modbus_id_19, nodeSO19, get_data_string );
         read_and_post_tempc( tempc_modbus_id_20, nodeSO20, get_data_string );
- */
         read_and_post_tempc( tempc_modbus_id_21, nodeSO21, get_data_string );
     }
+    check_error_state();
     delay_with_process( delay_time );
 }
 
 void delay_with_process( int d ) {
-    for( int x = 0; x < d; x+=250 ) {
+    int t0 = millis();
+    while( millis()-t0 < d ) {
         Particle.process();
-        delay( 250 );
-        if ( mqtt_client.isConnected() )
-            mqtt_client.loop();
+        delay( 100 );
+//        if ( mqtt_client.isConnected() )
+//            mqtt_client.loop();
     }
 }
 
@@ -273,7 +324,7 @@ void read_and_post_tempc( int id, ModbusMaster node, String get_data_string ) {
     String      parameter_name = "T";
  
     if( temp_ctl1.T > -999.9 ) {
-        if( id == co2c_modbus_id_01 ) {
+        if( id == co2_watchdog_modbus_id ) {
             system_name = "co2c";
             parameter_name = "P";
         }
@@ -281,18 +332,19 @@ void read_and_post_tempc( int id, ModbusMaster node, String get_data_string ) {
             +"&" + parameter_name + "=" + String(temp_ctl1.T) + "&SP=" + String(temp_ctl1.SP) + "&OUT1=" + 
             String(temp_ctl1.OUT1) + "&Alarm1=" + String(temp_ctl1.Alarm1);
         post_to_server( get_data_string );
-        log_msg( "system_id=" + String::format( "%02i", id) + "&" +parameter_name + "=" + String::format( "%0.1f", temp_ctl1.T ) + "&OUT1=" + 
-            String::format( "%04.1f", temp_ctl1.OUT1) + "&Alarm1=" + String(temp_ctl1.Alarm1) );
+//        log_msg( "system_id=" + String::format( "%02i", id) + "&" +parameter_name + "=" + String::format( "%0.1f", temp_ctl1.T ) + "&OUT1=" + 
+//            String::format( "%04.1f", temp_ctl1.OUT1) + "&Alarm1=" + String(temp_ctl1.Alarm1) );
     }
-    check_error_state();
+    else
+        log_msg( "Failed for id=" + String(id) );
 }
 
 int get_emerson_data( emerson_data *edata ) {
     uint8_t         result;
-    uint16_t        data[16];
+    uint16_t        data[28];
     char            err[256];
     
-    int qty  = 16;
+    int qty  = 28;
     int addr = 0;
     result = get_modbus_data3( nodeSG, data, addr, qty );
     if ( result == nodeSG.ku8MBSuccess ) {
@@ -319,10 +371,16 @@ void parse_emerson_data( uint16_t data[16], emerson_data *edata ) {
     edata->fvt      = convert_ints_to_float( &data[10] );
     edata->mflowdv  = convert_ints_to_float( &data[12] );
     edata->mflowv   = convert_ints_to_float( &data[14] );
+    edata->mflowt   = convert_ints_to_float( &data[16] );
+    edata->phyg1p   = convert_ints_to_float( &data[18] )*27.7076;
+    edata->phyg1t   = convert_ints_to_float( &data[20] );
+    edata->forkwet = convert_ints_to_float( &data[22] );
+    edata->forkhz  = convert_ints_to_float( &data[24] );
+    edata->forkt   = convert_ints_to_float( &data[26] );
 }
 
 int cloudSetDelayTime( String set_point ) {
-    report_wifi_stats( msg );
+    report_connection_stats( msg );
     log_msg( msg );
     
     int new_value = set_point.toInt();
@@ -516,10 +574,18 @@ void get_gateway_time( char* date_string ) {
 ModbusMaster systemID2node( int system_id ) {
     ModbusMaster    node;
 
-    if( system_id == co2c_modbus_id_01 )
-        node = nodeSO01;
+    if( system_id == co2_watchdog_modbus_id )
+        node = nodeCO2watchdog;
+    else if( system_id == smart_gateway_modbus_id )
+        node = nodeSG;
     else if( system_id == ph_modbus_id_03 )
         node = nodeSO03;
+    else if( system_id == humidity_modbus_id )
+        node = nodeHumidity;
+    else if( system_id == 5 )
+        node = nodeHum2;
+    else if( system_id == 7 )
+        node = nodeTEMP;
     else if( system_id == tempc_modbus_id_10 )
         node = nodeSO10;
     else if( system_id == tempc_modbus_id_11 )
@@ -546,7 +612,7 @@ ModbusMaster systemID2node( int system_id ) {
         node = nodeSO21;
     else if( system_id == gas_flow_meter_id )
         node = nodeGF;
-    
+        
     return(node);
 }
 
@@ -570,10 +636,20 @@ void set_temp_setpoint( int system_id, float new_setpoint ) {
     log_msg( msg );
 }
 
-void report_wifi_stats( char* s ){
+void report_connection_stats( char* s ){
+#if ( PLATFORM_ID == PLATFORM_PHOTON_PRODUCTION )
     int signal_strength = WiFi.RSSI();
     char* ssid          = (char *)WiFi.SSID();
     IPAddress ip        = WiFi.localIP();
+#endif
+
+#if ( PLATFORM_ID == PLATFORM_ELECTRON_PRODUCTION )
+    CellularSignal sig  = Cellular.RSSI();
+    int signal_strength = sig.rssi;
+    char* ssid          = "cellular";
+    IPAddress ip        = Cellular.localIP();
+#endif
+
     sprintf( s, "%s %idb %i.%i.%i.%i", ssid, signal_strength, ip[0], ip[1], ip[2], ip[3] );
     return;
 }
@@ -583,8 +659,8 @@ void check_error_state() {
         if( err_timer == 0 )
             err_timer = Time.now();
         else if ( Time.now() - err_timer < 300 ) {
-            if( err_count > 50 ) {
-                sprintf( msg, "Too many errors (%i), rebooting.", err_count );
+            if( err_count > 100 ) {
+                sprintf( msg, "Too many errors (%i), rebooting...", err_count );
                 log_msg( msg );
                 err_count = 0;
                 err_timer = 0;
@@ -595,7 +671,7 @@ void check_error_state() {
             error.setActive(true);
             fail.setActive(false);
         }
-        else {
+        else { // if we haven't had an error in 5 minutes, reset error state to green
             err_count = 0;
             err_timer = 0;
             normal.setActive(true);
@@ -646,6 +722,11 @@ temp_info get_temp_info( ModbusMaster node ) {
 
     result = get_modbus_data4( node, data, addr-1, qty );
     if ( result == node.ku8MBSuccess ) {
+        if( data[0] > 32769 ) {
+            log_msg( "Temp or temp probe not available: " + String::format( "%0x", data[0] ) + "H" );
+            delay(1000);
+            return( new_reading );
+        }
         new_reading.T  = data[0]/10.0;
         if( new_reading.T > 1000.0 )
             new_reading.T   = (float)(data[0]-65536)/10.0;
@@ -654,7 +735,7 @@ temp_info get_temp_info( ModbusMaster node ) {
     else {
         err_count++;
         get_modbus_error( node, result, err );
-        sprintf( msg, "Error: %i (%i): %s", result, addr, err );
+        sprintf( msg, "'%s (%i)' getting T/SP", err, result );
         log_msg( msg );
     }
     delay_with_process(250);
@@ -669,7 +750,7 @@ temp_info get_temp_info( ModbusMaster node ) {
     else {
         err_count++;
         get_modbus_error( node, result, err );
-        sprintf( msg, "Error: %i (%i): %s", result, addr, err );
+        sprintf( msg, "'%s (%i)' getting OUT1", err, result );
         log_msg( msg );
     }
     delay_with_process(250);
@@ -683,9 +764,10 @@ temp_info get_temp_info( ModbusMaster node ) {
     else {
         err_count++;
         get_modbus_error( node, result, err );
-        sprintf( msg, "Error: %i (%i): %s", result, addr, err );
+        sprintf( msg, "'%s (%i)' getting Alarm1", err, result );
         log_msg( msg );
     }
+    delay_with_process(250);
     return( new_reading );
 }
 
@@ -707,6 +789,31 @@ humidity get_humidity( ModbusMaster node ) {
         new_reading.T   = ((float)data[1]/10.0*1.8)+32.0;
         if( new_reading.T > 1000.0 )
             new_reading.T   = ((float)(data[1]-65536)/10.0*1.8)+32.0;
+     }
+    else {
+        err_count++;
+        get_modbus_error( node, result, err );
+        sprintf( msg, "Error: %i (%i): %s", result, addr, err );
+        log_msg( msg );
+    }
+    return( new_reading );
+}
+
+float get_temp( ModbusMaster node ) {
+    uint8_t         result;
+    uint16_t        addr, qty, data[2];
+    char            err[256];
+    float           new_reading;
+    
+    new_reading   = -999.9;
+
+    addr = 98;
+    qty  = 2;
+
+    result = get_modbus_data4( node, data, addr, qty );
+    if ( result == node.ku8MBSuccess ) {
+        new_reading = (float)data[0];
+        new_reading += (float)data[1]/65536.0;
      }
     else {
         err_count++;
@@ -747,7 +854,7 @@ ph get_ph( ModbusMaster node ) {
 
 devil_info get_devil_info( ModbusMaster node) {
     uint8_t         result;
-    uint16_t        qty = 2,
+    uint16_t        qty = 4,
                     addr;
     uint16_t        data[qty];
     char            err[256];
@@ -759,13 +866,17 @@ devil_info get_devil_info( ModbusMaster node) {
     new_reading.k_viscosity = -999.9;
     new_reading.humidity    = -999.9;
     
-    addr = 102;
+    addr = 104;
 
     result = get_modbus_data4( node, data, addr, qty );
     if ( result == node.ku8MBSuccess ) {
-//        log_msg( String(data[0]) );
+        sprintf( msg, "%i: %i (%0x), %i : %i (%0x)", addr, data[0], data[0], addr+2, data[1], data[1] );
+        log_msg( msg );
+
         new_reading.T           = convert_ints_to_float(&data[0]);
-//        new_reading.rho         = convert_ints_to_float(&data[4]);
+//        new_reading.T   = (float)(data[0] * 65536 + data[1]);
+
+           new_reading.rho         = convert_ints_to_float(&data[2]);
 //        new_reading.d_viscosity = convert_ints_to_float(&data[6]);
 //        new_reading.k_viscosity = convert_ints_to_float(&data[8]);
 //        new_reading.humidity    = convert_ints_to_float(&data[10]);
@@ -806,6 +917,12 @@ gas_flow get_gas_flow( ModbusMaster node ) {
     return( new_reading );
 }
 
+uint32_t convert_ints_to_int( uint16_t* w ) {
+    uint32_t new_int;
+    memcpy( &new_int, w, sizeof(uint32_t) );
+    return( new_int );
+}
+
 float convert_ints_to_float( uint16_t* w ) {
     float new_float;
     memcpy( &new_float, w, sizeof(float) );
@@ -836,8 +953,9 @@ void get_server_response( TCPClient connection ) {
     char        *buffer;
     size_t      sz = 512;
 
+    long t0 = millis();
     buffer = (char *) calloc( 1, sz );
-    while( connection.connected() ) {
+    while( connection.connected() && (millis()-t0 < 5000) ) {
         int new_bytes = connection.available();
         if( new_bytes > 0 ) {
             connection.read( (uint8_t *)buffer, new_bytes );
@@ -846,11 +964,11 @@ void get_server_response( TCPClient connection ) {
         }
         Particle.process();
     }
-    int pos = response.indexOf( "system_name" )-3;
+//    int pos = response.indexOf( "system_name" )-3;
 //    if( pos > 0 )
 //        log_msg( "OK: " + response.substring( pos+1 ) );
-    if( pos == 0 )
-        log_msg( "NOT OK: " + response );
+//    if( pos == 0 )
+//        log_msg( "NOT OK: " + response );
     connection.stop();
     response = "";
     free(buffer);
@@ -880,15 +998,15 @@ fork_info get_fork_info() {
 
 void log_msg( char* m ) {
 //    Serial.println( msg );
-    if ( mqtt_client.isConnected() )
-        mqtt_client.publish( MQTT_TOPIC, m );
-    else {
+//    if ( mqtt_client.isConnected() )
+//        mqtt_client.publish( MQTT_TOPIC, m );
+//    else {
         Particle.publish( "modbus", m, 300, PRIVATE );
-        mqtt_client.connect( System.deviceID() );
-        delay( 1000 );
-        if ( mqtt_client.isConnected() )
-            mqtt_client.publish( MQTT_TOPIC, m );
-    }
+//        mqtt_client.connect( System.deviceID() );
+//        delay( 5000 );
+//        if ( mqtt_client.isConnected() )
+//            mqtt_client.publish( MQTT_TOPIC, m );
+//    }
 }
 
 void log_msg( String m ) {
@@ -907,5 +1025,18 @@ int device_number( String device_id ) {
         dev_number = 6;
     else if( device_id == "3e002d001147343438323536" )
         dev_number = 7;
+    else if( device_id == "260032001147373036343935" )
+        dev_number = 8;
+    else if( device_id == "4e0048000351353530373132" )
+        dev_number = 9;
     return( dev_number );
 }
+
+#if ( PLATFORM_ID == PLATFORM_ELECTRON_PRODUCTION )
+int get_cell_usage() { 
+    CellularData data;
+    if (!Cellular.getDataUsage(data))
+        log_msg( "Error! Not able to get cell usage data." );
+    return( data.tx_session + data.rx_session );
+}
+#endif
